@@ -1,0 +1,73 @@
+---
+- hosts: "ansible_2"
+  gather_facts: true
+  tasks:
+  - name: Get name of cert to delete
+    register: ps
+    ansible.builtin.uri:
+      url: https://{{ hostvars[ 'pa-440' ].ansible_host }}/api/?type=config&action=get&xpath=/config/shared/ssl-tls-service-profile/entry[@name='gp-ssl-profile']/certificate&key={{ hostvars[ 'pa-440' ].palo_provider.api_key }}
+      validate_certs: no
+      method: GET
+      return_content: true
+  - name: Extract substring
+    set_fact:
+      cert_to_delete: "{{ ps.content | regex_search('<certificate.*?>(.*?)</certificate>') | regex_replace('<.*?>', '') }}"
+
+  - name: Set cert name variable
+    set_fact:
+      cert_name: "site.domain.com-{{ ansible_date_time.iso8601_basic_short }}"
+
+  - name: "Combine certs"
+    #shell: "cat /tmp/site.domain.com.key /tmp/site.domain.com.pem > /tmp/{{ cert_name }}"
+    shell: "cat {{ letsencrypt_keys_dir }}/site.domain.com.key {{ letsencrypt_certs_dir }}/site.domain.com.pem > {{ letsencrypt_certs_dir }}/{{ cert_name }}"
+
+- hosts: "pa-440"
+  connection: local
+  gather_facts: false
+  vars:
+    cert_name: '{{ hostvars.ansible_2.cert_name }}'
+    cert_to_delete: '{{ hostvars.ansible_2.cert_to_delete }}'
+    # Cannot use '-' in a variable name, hence ansible-2 is specified as ansible_2
+
+  collections:
+  - paloaltonetworks.panos
+
+  tasks:
+  - name: Import cert
+    panos_import:
+      provider: '{{ palo_provider }}'
+      category: 'keypair'
+      certificate_name: '{{ cert_name }}'
+      format: 'pem'
+      passphrase: '{{ cert_passphrase }}'
+      filename: '{{ letsencrypt_certs_dir }}/{{ cert_name }}'
+
+  - name: Update decryption rule cert
+    panos_decryption_rule:
+      provider: '{{ palo_provider }}'
+      name: 'ssl-inspect-1'
+      tags: ['public-ingress']
+      source_zones: ['wan']
+      source_addresses: ['any']
+      destination_zones: ['dmz']
+      destination_addresses: ['ext_1']
+      services: ['tcp-1']
+      action: 'decrypt'
+      decryption_type: 'ssl-inbound-inspection'
+      decryption_profile: 'decrypt-prof-ssl-inbound'
+      ssl_certificate: '{{ cert_name }}'
+
+  - name: Update SSL TLS profile cert
+    panos_type_cmd:
+      provider: '{{ palo_provider }}'
+      xpath: |
+        /config/shared/ssl-tls-service-profile/entry[@name='gp-ssl-profile']
+      element: |
+        <certificate>{{ cert_name }}</certificate>
+
+  - name: Delete old cert
+    panos_type_cmd:
+      provider: '{{ palo_provider }}'
+      cmd: 'delete'
+      xpath: |
+        /config/shared/certificate/entry[@name='{{ cert_to_delete }}']
