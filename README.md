@@ -1,5 +1,6 @@
 # Automated Palo Alto PAN-OS Certificate Renewal with Ansible
 
+* Ansible Core Version 2.14.4
 * PAN-OS Version 10.1.9-h1
 
 Rather than manually replacing certificates in PAN-OS I used this playbook to automate the process. This is useful when ustilising Let's Encrypt certificates which are only valid for 90 days.
