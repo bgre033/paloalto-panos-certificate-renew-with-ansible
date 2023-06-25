@@ -71,3 +71,7 @@
       cmd: 'delete'
       xpath: |
         /config/shared/certificate/entry[@name='{{ cert_to_delete }}']
+
+  - name: Commit changes
+    panos_commit_firewall:
+      provider: '{{ palo_provider }}'
